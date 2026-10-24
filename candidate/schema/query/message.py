@@ -1,19 +1,39 @@
 import json
 
 import graphene
+from graphene import relay
 from graphene_django import DjangoObjectType
 
-from candidate.models import Candidate
+from candidate.models import Candidate, CandidateMessage
 from candidate.whatsapp import send_template, send_text
 
 
-# ---------- Types ----------
+class CandidateMessageType(DjangoObjectType):
+    class Meta:
+        model = CandidateMessage
+        fields = "__all__"
+        convert_choices_to_enum = False
+
 
 class CandidateType(DjangoObjectType):
+    messages = graphene.List(CandidateMessageType)
+
     class Meta:
         model = Candidate
         fields = "__all__"
+        interfaces = (relay.Node,)
+        filter_fields = {
+            'candidate_id': ['exact'],
+            'full_name': ['exact', 'icontains'],
+            'phone_number': ['exact', 'icontains'],
+            'status': ['exact', 'in'],
+            'last_message': ['exact', 'gte', 'lte'],
+            'timestamp': ['exact', 'gte', 'lte'],
+        }
         convert_choices_to_enum = False  # return status as a plain string
+
+    def resolve_messages(self, info):
+        return self.messages.all().order_by('-timestamp')
 
 
 class SendResultType(graphene.ObjectType):
@@ -31,7 +51,7 @@ class BulkItemType(graphene.ObjectType):
     error = graphene.String()
 
 
-# ---------- Helpers ----------
+
 
 def _require_auth(info):
     user = getattr(info.context, "user", None)
