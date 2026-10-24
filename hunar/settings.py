@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'graphene_django',
     'django_filters',
     'corsheaders',
+    'candidate',
 ]
 
 
@@ -80,6 +81,11 @@ CORS_ALLOW_CREDENTIALS = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN")
+WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION")
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
