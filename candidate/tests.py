@@ -1,10 +1,14 @@
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
+import graphene
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from graphene import Schema
+
 from candidate.models import Candidate, CandidateMessage
+from candidate.schema.mutation.candidate import CreateCandidateMutation, DeleteCandidateMutation
 from candidate.schema.query import CandidateQuery
 from candidate.schema.query.message import CandidateType, _dispatch
 from candidate.whatsapp import send_template, send_text
@@ -100,3 +104,62 @@ class CandidateSchemaTests(TestCase):
         self.assertIsNone(result['message_id'])
         self.assertIn('24-hour', result['error'])
         mock_client.return_value.messages.create.assert_not_called()
+
+    def test_create_candidate_mutation_creates_record(self):
+        class Mutation(graphene.ObjectType):
+            create_candidate = CreateCandidateMutation.Field()
+
+        schema = Schema(query=CandidateQuery, mutation=Mutation)
+        result = schema.execute(
+            '''
+            mutation CreateCandidate($input: CreateCandidateInput!) {
+              createCandidate(input: $input) {
+                candidate {
+                  candidateId
+                  fullName
+                  phoneNumber
+                  status
+                }
+              }
+            }
+            ''',
+            variables={
+                'input': {
+                    'fullName': 'Jane Doe',
+                    'phoneNumber': '919900000111',
+                    'status': 'not_sent',
+                }
+            },
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual('Jane Doe', result.data['createCandidate']['candidate']['fullName'])
+        self.assertTrue(Candidate.objects.filter(full_name='Jane Doe').exists())
+
+    def test_delete_candidate_mutation_deletes_record(self):
+        candidate = Candidate.objects.create(
+            full_name='John Smith',
+            phone_number='919900000222',
+            status='not_sent',
+        )
+
+        class Mutation(graphene.ObjectType):
+            delete_candidate = DeleteCandidateMutation.Field()
+
+        schema = Schema(query=CandidateQuery, mutation=Mutation)
+        result = schema.execute(
+            '''
+            mutation DeleteCandidate($id: ID!) {
+              deleteCandidate(id: $id) {
+                found
+                deletedRawId
+                deletedId
+              }
+            }
+            ''',
+            variables={'id': str(candidate.candidate_id)},
+        )
+
+        self.assertIsNone(result.errors)
+        self.assertTrue(result.data['deleteCandidate']['found'])
+        self.assertFalse(Candidate.objects.filter(pk=candidate.pk).exists())
