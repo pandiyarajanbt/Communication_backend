@@ -18,7 +18,7 @@ class SendWhatsAppMessage(graphene.Mutation):
     Output = SendResultType
 
     def mutate(self, info, candidate_id, message=None, template="hello_world", params=None):
-        _require_auth(info)
+        # _require_auth(info)
 
         try:
             candidate = Candidate.objects.get(pk=candidate_id)
@@ -43,7 +43,7 @@ class SendWhatsAppBulk(graphene.Mutation):
     results = graphene.List(BulkItemType)
 
     def mutate(self, info, candidate_ids=None, message=None, template="hello_world", params=None):
-        _require_auth(info)
+        # _require_auth(info)
 
         if candidate_ids:
             candidates = Candidate.objects.filter(pk__in=candidate_ids)

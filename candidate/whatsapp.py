@@ -1,100 +1,109 @@
-import requests
+import json
+from datetime import timedelta
+
 from django.conf import settings
 from django.utils import timezone
+from twilio.rest import Client
+
 from .models import Candidate, CandidateMessage, Status
 
 
-def _url():
-    return (
-        f"https://graph.facebook.com/{settings.WHATSAPP_API_VERSION}/"
-        f"{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
-    )
+def _normalize_whatsapp_number(value):
+    value = str(value or '').strip()
+    if not value:
+        raise ValueError('Phone number is required')
+    if value.startswith('whatsapp:'):
+        return value
+    return f'whatsapp:{value}'
 
 
-def _headers():
-    return {
-        "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
+def _from_number():
+    from_number = (settings.TWILIO_WHATSAPP_NUMBER or '').strip()
+    if not from_number:
+        raise RuntimeError('Twilio WhatsApp number is not configured')
+    return from_number if from_number.startswith('whatsapp:') else f'whatsapp:{from_number}'
+
+
+def _client():
+    account_sid = settings.TWILIO_ACCOUNT_SID
+    auth_token = settings.TWILIO_AUTH_TOKEN
+    if not account_sid or not auth_token:
+        raise RuntimeError('Twilio credentials are not configured')
+    return Client(account_sid, auth_token)
 
 
 def send_template(candidate: Candidate, template_name="hello_world", lang="en_US", params=None):
-    """Send an approved template message to one candidate."""
-    template = {"name": template_name, "language": {"code": lang}}
+    """Send a Twilio WhatsApp template message if a template SID is configured."""
+    template_sid = getattr(settings, 'TWILIO_WHATSAPP_TEMPLATE_SID', '')
+    template_sid = str(template_sid or '').strip()
 
-    # Optional: fill {{1}}, {{2}} variables in your template
+    if template_sid:
+        variables = {}
+        if params:
+            for index, value in enumerate(params, start=1):
+                variables[str(index)] = value
+        payload = {
+            'content_sid': template_sid,
+            'from_': _from_number(),
+            'to': _normalize_whatsapp_number(candidate.phone_number),
+            'content_variables': json.dumps(variables),
+        }
+        return _send(candidate, payload, message_text=f'Template: {template_name}')
+
+    safe_message = template_name if isinstance(template_name, str) and template_name else 'Hello from Twilio'
     if params:
-        template["components"] = [{
-            "type": "body",
-            "parameters": [{"type": "text", "text": p} for p in params],
-        }]
+        safe_message = ' '.join(str(value) for value in params)
+    return send_text(candidate, safe_message)
 
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": candidate.phone_number,
-        "type": "template",
-        "template": template,
-    }
-    return _send(candidate, payload)
+
+def _has_active_whatsapp_window(candidate: Candidate, hours: int = 24) -> bool:
+    if not candidate.last_message:
+        return False
+    return timezone.now() - candidate.last_message <= timedelta(hours=hours)
 
 
 def send_text(candidate: Candidate, body: str):
-    """Free-form text. Only works within 24h of the candidate's last reply."""
+    """Send a free-form WhatsApp text message through Twilio."""
     payload = {
-        "messaging_product": "whatsapp",
-        "to": candidate.phone_number,
-        "type": "text",
-        "text": {"body": body},
+        'body': body,
+        'from_': _from_number(),
+        'to': _normalize_whatsapp_number(candidate.phone_number),
     }
-    return _send(candidate, payload)
+    return _send(candidate, payload, message_text=body)
 
 
 def _message_text(payload):
-    if payload.get("type") == "text":
-        return payload.get("text", {}).get("body") or "WhatsApp text message"
-    if payload.get("template"):
-        template_name = payload.get("template", {}).get("name")
-        if template_name:
-            return f"Template: {template_name}"
-    return "WhatsApp message"
+    if payload.get('body'):
+        return payload.get('body')
+    if payload.get('content_sid'):
+        return f"Template: {payload.get('content_sid')}"
+    return 'Twilio WhatsApp message'
 
 
-def _send(candidate, payload):
-    message_text = _message_text(payload)
+def _send(candidate, payload, message_text=None):
+    message_text = message_text or _message_text(payload)
 
     try:
-        resp = requests.post(_url(), json=payload, headers=_headers(), timeout=15)
-        data = resp.json()
-    except requests.RequestException as e:
+        message = _client().messages.create(**payload)
+    except Exception as e:
         candidate.status = Status.FAILED.value
-        candidate.save(update_fields=["status"])
+        candidate.save(update_fields=['status'])
         CandidateMessage.objects.create(
             candidate=candidate,
-            message_id="",
+            message_id='',
             message=message_text,
             status=Status.FAILED.value,
         )
-        return {"ok": False, "error": str(e)}
+        return {'ok': False, 'error': str(e)}
 
-    if resp.status_code == 200 and "messages" in data:
-        candidate.status = Status.SEND.value
-        candidate.whatsapp_message_id = data["messages"][0]["id"]
-        candidate.last_message = timezone.now()
-        candidate.save(update_fields=["status", "whatsapp_message_id", "last_message"])
-        CandidateMessage.objects.create(
-            candidate=candidate,
-            message_id=candidate.whatsapp_message_id,
-            message=message_text,
-            status=Status.SEND.value,
-        )
-        return {"ok": True, "message_id": candidate.whatsapp_message_id}
-
-    candidate.status = Status.FAILED.value
-    candidate.save(update_fields=["status"])
+    candidate.status = Status.SEND.value
+    candidate.whatsapp_message_id = getattr(message, 'sid', '')
+    candidate.last_message = timezone.now()
+    candidate.save(update_fields=['status', 'whatsapp_message_id', 'last_message'])
     CandidateMessage.objects.create(
         candidate=candidate,
-        message_id="",
+        message_id=candidate.whatsapp_message_id,
         message=message_text,
-        status=Status.FAILED.value,
+        status=Status.SEND.value,
     )
-    return {"ok": False, "error": data.get("error", data)}
+    return {'ok': True, 'message_id': candidate.whatsapp_message_id}

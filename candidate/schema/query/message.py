@@ -1,11 +1,12 @@
 import json
 
 import graphene
+from django.conf import settings
 from graphene import relay
 from graphene_django import DjangoObjectType
 
 from candidate.models import Candidate, CandidateMessage
-from candidate.whatsapp import send_template, send_text
+from candidate.whatsapp import _has_active_whatsapp_window, send_template, send_text
 
 
 class CandidateMessageType(DjangoObjectType):
@@ -60,9 +61,18 @@ def _require_auth(info):
 
 
 def _dispatch(candidate, message, template, params):
-    """Send free text if message given, otherwise a template."""
-    if message:
+    """Free-form sends require an active 24-hour window; otherwise use an approved template."""
+    if message and _has_active_whatsapp_window(candidate):
         result = send_text(candidate, message)
+    elif message:
+        template_sid = str(getattr(settings, 'TWILIO_WHATSAPP_TEMPLATE_SID', '') or '').strip()
+        if not template_sid:
+            return {
+                "ok": False,
+                "message_id": None,
+                "error": "WhatsApp free-form messages require an active 24-hour customer window or a valid approved template. Configure TWILIO_WHATSAPP_TEMPLATE_SID.",
+            }
+        result = send_template(candidate, template_name=template, params=params)
     else:
         result = send_template(candidate, template_name=template, params=params)
 
