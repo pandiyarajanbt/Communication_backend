@@ -7,11 +7,9 @@ from candidate.schema.query.message import _require_auth, _dispatch, SendResultT
 
 
 class SendWhatsAppMessage(graphene.Mutation):
-    """Send a WhatsApp message to ONE candidate."""
-
     class Arguments:
         candidate_id = graphene.Int(required=True)
-        message = graphene.String()                      # free text (24h window only)
+        message = graphene.String()                     
         template = graphene.String(default_value="hello_world")
         params = graphene.List(graphene.String)          # template variables {{1}}, {{2}}
 

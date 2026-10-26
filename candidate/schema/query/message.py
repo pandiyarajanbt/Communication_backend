@@ -31,7 +31,7 @@ class CandidateType(DjangoObjectType):
             'last_message': ['exact', 'gte', 'lte'],
             'timestamp': ['exact', 'gte', 'lte'],
         }
-        convert_choices_to_enum = False  # return status as a plain string
+        convert_choices_to_enum = False  
 
     def resolve_messages(self, info):
         return self.messages.all().order_by('-timestamp')
@@ -61,7 +61,6 @@ def _require_auth(info):
 
 
 def _dispatch(candidate, message, template, params):
-    """Free-form sends require an active 24-hour window; otherwise use an approved template."""
     if message and _has_active_whatsapp_window(candidate):
         result = send_text(candidate, message)
     elif message:
@@ -70,7 +69,7 @@ def _dispatch(candidate, message, template, params):
             return {
                 "ok": False,
                 "message_id": None,
-                "error": "WhatsApp free-form messages require an active 24-hour customer window or a valid approved template. Configure TWILIO_WHATSAPP_TEMPLATE_SID.",
+                "error": error,
             }
         result = send_template(candidate, template_name=template, params=params)
     else:

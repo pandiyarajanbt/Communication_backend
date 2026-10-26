@@ -33,7 +33,6 @@ def _client():
 
 
 def send_template(candidate: Candidate, template_name="hello_world", lang="en_US", params=None):
-    """Send a Twilio WhatsApp template message if a template SID is configured."""
     template_sid = getattr(settings, 'TWILIO_WHATSAPP_TEMPLATE_SID', '')
     template_sid = str(template_sid or '').strip()
 
